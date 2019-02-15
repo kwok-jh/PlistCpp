@@ -1,3 +1,17 @@
+这个分支来自animetrics/PlistCpp(https://github.com/animetrics/PlistCpp)
+该分支仅提供基础的组件并有如下修改:
+
+1.2018-5 by kwok-jh - 优化解析稳定性
+2.2018-7 by kwok-jh - 增加了对UID类型的支持 
+3.2019-1 by kwok-jh - 增加了对real类型infinity状态的支持.
+
+This branch form animetrics/PlistCpp(https://github.com/animetrics/PlistCpp)
+This branch only provides basic components with the has following modifications:
+
+1.2018-5 by kwok-jh - Optimized analytic stability.
+2.2018-7 by kwok-jh - Support for UID types has been added.
+3.2019-1 by kwok-jh - Support for real types of infinity state has been added.
+
 -----------------
 DESCRIPTION
 -----------------
@@ -99,5 +113,3 @@ cmake ..
 start Plist.sln  (build solution)
 cd ..
 runTests.bat Release
-
-
