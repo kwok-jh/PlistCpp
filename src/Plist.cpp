@@ -25,6 +25,7 @@
 
 #include "Plist.hpp"
 #include <boost/locale/encoding_utf.hpp>
+#include <boost/math/special_functions.hpp>
 #include <list>
 #include <sstream>
 #include "base64.hpp"
@@ -82,20 +83,28 @@ namespace Plist {
 
 		template<typename T>
 			std::string stringFromValue(const T& value);
+        template<>
+            std::string stringFromValue(const float& value);
+        template<>
+            std::string stringFromValue(const double& value);
+
 		template<typename T>
 			void writeXMLSimpleNode(pugi::xml_node& node, const char* name, const boost::any& obj);
 
 		// xml parsing
 
-		dictionary_type parseDictionary(pugi::xml_node& node);
+        uid_type parseUID(pugi::xml_node& node);
+		dictionary_type parseDictionary(pugi::xml_node& node, bool& detectionUid);
 		array_type parseArray(pugi::xml_node& node);
 		std::vector<char> base64Decode(const char* data);
 		void base64Encode(std::string& dataEncoded, const std::vector<char>& data);
 		Date parseDate(pugi::xml_node& node);
+        double parseReal(pugi::xml_node& node);
 		boost::any parse(pugi::xml_node& doc);
 
 		// xml writing
 
+        void writeXMLUID(pugi::xml_node& node, const uid_type& uid);
 		void writeXMLArray(pugi::xml_node& node, const array_type& array);
 		void writeXMLDictionary(pugi::xml_node& node, const dictionary_type& message);
 		void writeXMLNode(pugi::xml_node& node, const boost::any& obj);
@@ -119,6 +128,7 @@ namespace Plist {
 		array_type  parseBinaryArray(const PlistHelperData& d, int objRef);
 		std::vector<int32_t> getRefsForContainers(const PlistHelperData& d, int objRef);
 		int64_t parseBinaryInt(const PlistHelperData& d, int headerPosition, int& intByteCount);
+        uid_type parseBinaryUID(const PlistHelperData& d, int headerPosition);
 		double parseBinaryReal(const PlistHelperData& d, int headerPosition);
 		Date parseBinaryDate(const PlistHelperData& d, int headerPosition);
 		bool parseBinaryBool(const PlistHelperData& d, int headerPosition);
@@ -137,6 +147,7 @@ namespace Plist {
 		int countArray(const array_type& array);
 		std::vector<unsigned char> writeBinaryDictionary(PlistHelperData& d, const dictionary_type& dictionary);
 		std::vector<unsigned char> writeBinaryArray(PlistHelperData& d, const array_type& array);
+		std::vector<unsigned char> writeBinaryUID(PlistHelperData& d, uid_type value);
 		std::vector<unsigned char> writeBinaryByteArray(PlistHelperData& d, const data_type& byteArray);
 		std::vector<unsigned char> writeBinaryInteger(PlistHelperData& d, int64_t value, bool write);
 		std::vector<unsigned char> writeBinaryBool(PlistHelperData& d, bool value);
@@ -184,6 +195,8 @@ void writeXMLNode(pugi::xml_node& node, const boost::any& obj)
 		writeXMLSimpleNode<string_type>(node, "string", obj);
 	else if(objType == typeid(array_type))
 		writeXMLArray(node, boost::any_cast<const array_type&>(obj));
+    else if(objType == typeid(uid_type))
+        writeXMLUID(node, boost::any_cast<const uid_type&>(obj));
 	else if(objType == typeid(data_type))
 	{
 		string dataEncoded;
@@ -203,6 +216,19 @@ void writeXMLNode(pugi::xml_node& node, const boost::any& obj)
 	}
 	else
 		throw Error((string("Plist Error: Can't serialize type ") + objType.name()).c_str());
+}
+
+void writeXMLUID(
+        pugi::xml_node& node, 
+        const uid_type& uid)
+{
+    using namespace std;
+    pugi::xml_node newNode = node.append_child("dict");
+
+    pugi::xml_node keyNode = newNode.append_child("key");
+    keyNode.append_child(pugi::node_pcdata).set_value("CF$UID");
+
+    writeXMLNode(newNode, (integer_type)uid);
 }
 
 void writeXMLArray(
@@ -426,6 +452,8 @@ std::vector<unsigned char> writeBinary(PlistHelperData& d, const boost::any& obj
 		value = writeBinaryDate(d, boost::any_cast<const Date&>(obj));
 	else if(objType == typeid(bool))
 		value = writeBinaryBool(d, boost::any_cast<const bool&>(obj));
+	else if(objType == typeid(uid_type))
+		value = writeBinaryUID(d, boost::any_cast<const uid_type&>(obj));
 	else
 		throw Error((string("Plist Error: Can't serialize type ") + objType.name()).c_str());
 
@@ -573,6 +601,22 @@ std::vector<unsigned char> writeBinaryDictionary(PlistHelperData& d, const dicti
 	return buffer;
 }
 
+std::vector<unsigned char> writeBinaryUID(PlistHelperData& d, uid_type value)
+{
+	using namespace std;
+	
+	vector<unsigned char> buffer = intToBytes<int64_t>(value, hostLittleEndian());
+	buffer = regulateNullBytes(intToBytes<int64_t>(value, hostLittleEndian()), 1);
+	
+	unsigned char header = 0x80 | (buffer.size() - 1);
+	buffer.push_back(header);
+	
+	reverse(buffer.begin(), buffer.end());
+
+	d._objectTable.insert(d._objectTable.begin(), buffer.begin(), buffer.end());
+	return buffer;
+}
+
 std::vector<unsigned char> writeBinaryDouble(PlistHelperData& d, double value)
 {
 	using namespace std;
@@ -698,7 +742,7 @@ int countArray(const array_type& array)
 
 void readPlist(std::istream& stream, boost::any& message)
 {
-	int start = stream.tellg();
+	int start = (int)stream.tellg();
 	stream.seekg(0, std::ifstream::end);
 	int size = ((int) stream.tellg()) - start;
 	if(size > 0)
@@ -731,6 +775,9 @@ void readPlist(const char* byteArrayTemp, int64_t size, boost::any& message)
 		PlistHelperData d;
 		parseTrailer(d, getRange(byteArray, size - 32, 32));
 
+        if(0 >= d._offsetTableOffset || d._offsetTableOffset >= size)
+            throw Error("Invalid size");
+
 		d._objectTable = getRange(byteArray, 0, d._offsetTableOffset);
 		std::vector<unsigned char> offsetTableBytes = getRange(byteArray, d._offsetTableOffset, size - d._offsetTableOffset - 32);
 
@@ -751,7 +798,17 @@ void readPlist(const char* byteArrayTemp, int64_t size, boost::any& message)
 
 }
 
-dictionary_type parseDictionary(pugi::xml_node& node)
+uid_type parseUID(pugi::xml_node& node)
+{
+    pugi::xml_node_iterator it = ++node.begin();
+
+    if(it == node.end())
+        throw Error("Plist: XML UID value expected for key CF$UID but not found");
+
+    return (uid_type) _strtoi64(it->first_child().value(), 0, 10);
+}
+
+dictionary_type parseDictionary(pugi::xml_node& node, bool& detectionUid)
 {
 	using namespace std;
 
@@ -762,6 +819,13 @@ dictionary_type parseDictionary(pugi::xml_node& node)
 			throw Error("Plist: XML dictionary key expected but not found");
 
 		string key(it->first_child().value());
+
+        if(string("CF$UID") == key)
+        {
+            detectionUid = true;
+            return dictionary_type();
+        }
+
 		++it;
 
 		if(it == node.end())
@@ -792,6 +856,18 @@ Date parseDate(pugi::xml_node& node)
 	date.setTimeFromXMLConvention(node.first_child().value());
 
 	return date;
+}
+
+double parseReal(pugi::xml_node& node)
+{
+    std::string value = node.first_child().value();
+
+    if(value == "+infinity")
+        return std::numeric_limits<double>::infinity();
+    else if(value == "-infinity")
+        return -std::numeric_limits<double>::infinity();
+    else
+        return boost::lexical_cast<double>(value);
 }
 
 std::vector<char> base64Decode(const char* encodedData)
@@ -831,15 +907,21 @@ boost::any parse(pugi::xml_node& node)
 
 	boost::any result;
 	if("dict" == nodeName)
-		result = parseDictionary(node);
+    {
+        bool isUid = false;
+        result = parseDictionary(node, isUid);
+
+        if(isUid)
+            result = parseUID(node);
+    }
 	else if("array" == nodeName)
 		result = parseArray(node);
 	else if("string" == nodeName)
 		result = string(node.first_child().value());
 	else if("integer" == nodeName)
-		result = (int64_t) atoll(node.first_child().value());
+		result = (int64_t) _strtoi64(node.first_child().value(), 0, 10);
 	else if("real" == nodeName)
-		result = atof(node.first_child().value());
+        result = parseReal(node);
 	else if("false" == nodeName)
 		result = bool(false);
 	else if("true" == nodeName)
@@ -883,6 +965,8 @@ void parseTrailer(PlistHelperData& d, const std::vector<unsigned char>& trailer)
 
 std::vector<unsigned char> regulateNullBytes(const std::vector<unsigned char>& origBytes, unsigned int minBytes)
 {
+    if(origBytes.empty())
+        throw Error("parse error.");
 
 	std::vector<unsigned char> bytes(origBytes);
 	while((bytes.back() == 0) && (bytes.size() > minBytes))
@@ -896,6 +980,12 @@ std::vector<unsigned char> regulateNullBytes(const std::vector<unsigned char>& o
 
 boost::any parseBinary(const PlistHelperData& d, int objRef)
 {
+    if(d._offsetTable.size() <= (size_t)objRef)
+        throw Error("parse error.");
+
+    if(d._objectTable.size() <= (size_t)d._offsetTable[objRef])
+        throw Error("parse error.");
+
 	unsigned char header = d._objectTable[d._offsetTable[objRef]];
 	switch (header & 0xF0)
 	{
@@ -928,6 +1018,10 @@ boost::any parseBinary(const PlistHelperData& d, int objRef)
 			{
 				return parseBinaryUnicode(d, d._offsetTable[objRef]);
 			}
+        case 0x80:
+            {
+                return parseBinaryUID(d, d._offsetTable[objRef]);
+            }
 		case 0xD0:
 			{
 				return parseBinaryDictionary(d, objRef);
@@ -1000,6 +1094,17 @@ dictionary_type parseBinaryDictionary(const PlistHelperData& d, int objRef)
 	return dict;
 }
 
+uid_type parseBinaryUID(const PlistHelperData& d, int headerPosition)
+{
+	unsigned char header = d._objectTable[headerPosition];
+	int byteCount = (header & 0xf) + 1;
+	
+	std::vector<unsigned char> buffer = getRange(d._objectTable, headerPosition + 1, byteCount);
+	reverse(buffer.begin(), buffer.end());
+
+	return bytesToInt<uint64_t>(vecData(regulateNullBytes(buffer, 8)), hostLittleEndian());
+}
+
 std::string parseBinaryString(const PlistHelperData& d, int headerPosition)
 {
 	unsigned char headerByte = d._objectTable[headerPosition];
@@ -1008,8 +1113,12 @@ std::string parseBinaryString(const PlistHelperData& d, int headerPosition)
 	charStartPosition += headerPosition;
 
 	std::vector<unsigned char> characterBytes = getRange(d._objectTable, charStartPosition, charCount);
-	std::string buffer = std::string((char*) vecData(characterBytes), characterBytes.size());
-	return buffer;
+
+    //如果为空那么返回空字符串
+    if(!characterBytes.empty())
+        return std::string((char*) vecData(characterBytes), characterBytes.size());
+
+	return std::string();
 }
 
 std::string parseBinaryUnicode(const PlistHelperData& d, int headerPosition)
@@ -1132,6 +1241,32 @@ std::string stringFromValue(const T& value)
 	return ss.str();
 }
 
+template<>
+std::string stringFromValue(const float& value)
+{
+    if(boost::math::isinf(value))
+        return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
+    else
+    {
+        std::stringstream ss;
+        ss<<value;
+        return ss.str();
+    }
+}
+
+template<>
+std::string stringFromValue(const double& value)
+{
+    if(boost::math::isinf(value))
+        return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
+    else
+    {
+        std::stringstream ss;
+        ss<<value;
+        return ss.str();
+    }
+}
+
 template <typename IntegerType>
 IntegerType bytesToInt(const unsigned char* bytes, bool littleEndian)
 {
@@ -1178,9 +1313,9 @@ std::vector<unsigned char> intToBytes(IntegerType val, bool littleEndian)
 
 	for(unsigned n = 0; n < numBytes; ++n)
 		if(littleEndian)
-			bytes[n] = (val >> 8 * n) & 0xff;
+			bytes[n] = (unsigned char)(val >> 8 * n) & 0xff;
 		else
-			bytes[numBytes - 1 - n] = (val >> 8 * n) & 0xff;
+			bytes[numBytes - 1 - n] = (unsigned char)(val >> 8 * n) & 0xff;
 
 	return bytes;
 }

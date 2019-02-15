@@ -29,12 +29,22 @@
 #include "Plist.hpp" // Plist::Error
 #include <stdexcept>
 #include <stdio.h>
+#include <cstdlib>
+#include <time.h>
+
+#include <boost/date_time.hpp>
+
+#ifdef _MSC_VER
+#pragma warning(disable:4996)
+#endif
 
 namespace Plist {
 
-Date::Date()
+Date::Date(time_t unix_epoch /*= 0*/)
+    : _time(unix_epoch)
 {
-	setToCurrentTime();
+    if(0 == _time)
+        setToCurrentTime();
 }
 
 Date::Date(int month, int day, int year, int hour24, int minute, int second, bool UTC)
@@ -142,8 +152,9 @@ bool Date::operator == (const Date& rhs) const
 std::string Date::timeAsXMLConvention() const
 {
 	char result[21];
-	struct tm tmTime;
+    struct tm tmTime = {0};
 
+#if 0
 	// use thread safe versions here.  Notice that arguments
 	// are reversed for windows version
 #if defined(_WIN32) || defined(_WIN64)
@@ -151,6 +162,22 @@ std::string Date::timeAsXMLConvention() const
 #else
 	gmtime_r(&_time, &tmTime);
 #endif
+#else
+
+    boost::posix_time::ptime pt(boost::gregorian::date(1970, 1, 1));
+                             pt += boost::posix_time::time_duration(0, 0, _time);
+    tmTime = boost::posix_time::to_tm(pt);
+#endif
+    
+    if(tmTime.tm_mon  < 0 || tmTime.tm_mon  > 11 ||     /* months since January - [0,11] */
+       tmTime.tm_mday < 0 || tmTime.tm_mday > 31 ||     /* day of the month - [1,31] */
+       tmTime.tm_hour < 0 || tmTime.tm_hour > 23 ||     /* hours since midnight - [0,23] */
+       tmTime.tm_min  < 0 || tmTime.tm_min  > 59 ||     /* minutes after the hour - [0,59] */
+       tmTime.tm_sec  < 0 || tmTime.tm_sec  > 59  )     /* seconds after the minute - [0,59] */
+    {
+        return std::string("1970-01-01T00:00:00Z");
+    }
+
 	// %F and %T not portable so using %Y-%m-%d and %H:%M:%S instead
 	strftime(&result[0], 21, "%Y-%m-%dT%H:%M:%SZ", &tmTime);
 	return std::string(&result[0]);
