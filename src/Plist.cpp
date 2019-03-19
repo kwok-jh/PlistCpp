@@ -1244,14 +1244,7 @@ std::string stringFromValue(const T& value)
 template<>
 std::string stringFromValue(const float& value)
 {
-    if(boost::math::isinf(value))
-        return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
-    else
-    {
-        std::stringstream ss;
-        ss<<value;
-        return ss.str();
-    }
+    return stringFromValue(double(value));
 }
 
 template<>
@@ -1260,11 +1253,7 @@ std::string stringFromValue(const double& value)
     if(boost::math::isinf(value))
         return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
     else
-    {
-        std::stringstream ss;
-        ss<<value;
-        return ss.str();
-    }
+        return boost::lexical_cast<std::string>(value);
 }
 
 template <typename IntegerType>
