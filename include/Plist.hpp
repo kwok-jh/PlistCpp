@@ -82,6 +82,7 @@ namespace Plist
 
 		void writePlistBinary(std::ostream& stream, const boost::any& message);
 		void writePlistBinary(std::vector<char>& plist, const boost::any& message);
+        void writePlistBinary(std::string& plist, const boost::any& message);
 		void writePlistBinary(const char* filename, const boost::any& message);
 #if defined(_MSC_VER)
 		void writePlistBinary(const wchar_t* filename, const boost::any& message);
@@ -91,6 +92,7 @@ namespace Plist
 
 		void writePlistXML(std::ostream& stream, const boost::any& message);
 		void writePlistXML(std::vector<char>& plist, const boost::any& message);
+        void writePlistXML(std::string& plist, const boost::any& message);
 		void writePlistXML(const char* filename, const boost::any& message);
 #if defined(_MSC_VER)
 		void writePlistXML(const wchar_t* filename, const boost::any& message);

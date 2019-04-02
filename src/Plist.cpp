@@ -326,7 +326,9 @@ void writePlistBinary(
 	d._objectTable.insert(d._objectTable.end(), temp.rbegin(), temp.rend());
 }
 
-void writePlistBinary(std::vector<char>& plist, const boost::any& message)
+void writePlistBinary(
+                std::vector<char>& plist, 
+                const boost::any& message)
 {
 	PlistHelperData d;
 	writePlistBinary(d, message);
@@ -334,9 +336,20 @@ void writePlistBinary(std::vector<char>& plist, const boost::any& message)
 	std::copy((const char*) vecData(d._objectTable), (const char*) vecData(d._objectTable) + d._objectTable.size(), plist.begin());
 }
 
+
 void writePlistBinary(
-		std::ostream& stream,
-		const boost::any& message)
+                std::string& plist, 
+                const boost::any& message)
+{
+    PlistHelperData d;
+    writePlistBinary(d, message);
+    plist.resize(d._objectTable.size());
+    std::copy((const char*) vecData(d._objectTable), (const char*) vecData(d._objectTable) + d._objectTable.size(), plist.begin());
+}
+
+void writePlistBinary(
+		        std::ostream& stream,
+		        const boost::any& message)
 {
 	PlistHelperData d;
 	writePlistBinary(d, message);
@@ -372,6 +385,13 @@ void writePlistXML(std::vector<char>& plist, const boost::any& message)
 	std::istreambuf_iterator<char> end;
 	plist.clear();
 	plist.insert(plist.begin(), beg, end);
+}
+
+void writePlistXML(std::string& plist, const boost::any& message)
+{
+    std::stringstream ss;
+    writePlistXML(ss, message);
+    boost::swap(plist, ss.str());
 }
 
 void writePlistXML(
@@ -1253,7 +1273,11 @@ std::string stringFromValue(const double& value)
     if(boost::math::isinf(value))
         return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
     else
-        return boost::lexical_cast<std::string>(value);
+    {
+        char buf[_MAX_EXP_DIG + _MAX_SIG_DIG + 64];
+        sprintf_s(buf, sizeof(buf), "%lf", value);
+        return std::string(buf);
+    }
 }
 
 template <typename IntegerType>
