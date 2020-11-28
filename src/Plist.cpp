@@ -1274,7 +1274,11 @@ std::string stringFromValue(const double& value)
         return (boost::math::signbit(value) == 0 ? "+" : "-") + std::string("infinity");
     else
     {
+#if _MSC_VER > 1600
+        char buf[_MAX_EXP_DIG + _MAX_SIG_DIG_V1 + 64];
+#else
         char buf[_MAX_EXP_DIG + _MAX_SIG_DIG + 64];
+#endif
         sprintf_s(buf, sizeof(buf), "%lf", value);
         return std::string(buf);
     }
